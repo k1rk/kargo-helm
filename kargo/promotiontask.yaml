@@ -1,0 +1,58 @@
+apiVersion: kargo.akuity.io/v1alpha1
+kind: PromotionTask
+metadata:
+  name: promote-helm
+  namespace: kargo-helm
+spec:
+  vars:
+  - name: repoURL
+    value: https://github.com/k1rk/kargo-helm.git
+  - name: branch
+    value: main
+  - name: image
+    value: ghcr.io/k1rk/guestbook
+  steps:
+  # Clone the Git repository that contains the Kustomize configuration
+  # to the ./src directory.
+  - uses: git-clone
+    config:
+      repoURL: ${{ vars.repoURL }}
+      checkout:
+      - fromFreight: true
+        path: ./src
+      - branch: ${{ vars.branch }}
+        path: ./out
+
+  - uses: helm-update-image
+    as: update-image
+    config:
+      path: ./out/env/${{ ctx.stage }}/values.yaml
+      images:
+      - image: ${{ vars.image }}
+        key: image.tag
+        value: Tag
+
+  - uses: copy
+    config:
+      inPath: ./src/base/feature-flags.yaml
+      outPath: ./out/env/${{ ctx.stage }}/feature-flags.yaml
+
+  # Commit the changes to the Git repository.
+  - uses: git-commit
+    as: commit
+    config:
+      path: ./out
+      messageFromSteps:
+      - update-image
+  # Push the changes to the Git repository.
+  - uses: git-push
+    config:
+      path: ./out
+
+  - uses: argocd-update
+    config:
+      apps:
+      - name: kargo-helm-${{ ctx.stage }}
+        sources:
+        - repoURL: ${{ vars.repoURL }}
+          desiredCommitFromStep: commit
